@@ -2,6 +2,7 @@ import type { TezosToolkit } from '@tezos-x/octez.js';
 import type { ShieldBridgeSDK } from 'shield-bridge-sdk';
 import type { ContractParams } from './types.js';
 import { resolveSetAddress } from './setAddress.js';
+import { sendSaplingOpCapped } from './broadcast.js';
 
 /**
  * Phase 1 — broadcast the user's payment (a 1-XTZ shielded transfer to the
@@ -19,7 +20,7 @@ export async function broadcastPayment(
 ): Promise<string> {
   const xtzSetAddress = await resolveSetAddress(client, factoryAddress);
   const setContract = await client.contract.at(xtzSetAddress);
-  const op = await setContract.methodsObject.default!(payment.txns).send();
+  const op = await sendSaplingOpCapped(client, setContract.methodsObject.default!(payment.txns), 'payment');
   onBroadcast?.(op.hash);
   await op.confirmation(confirmations);
   return op.hash;

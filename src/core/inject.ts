@@ -1,6 +1,7 @@
 import type { TezosToolkit } from '@tezos-x/octez.js';
 import type { ContractParams } from './types.js';
 import { resolveSetAddress } from './setAddress.js';
+import { sendSaplingOpCapped } from './broadcast.js';
 
 /**
  * Phase 2 — broadcast the user's real operation(s) from the BROADCAST worker's
@@ -22,7 +23,7 @@ export async function injectUserTransaction(
     const params = txArray[0]!;
     const setAddress = await resolveSetAddress(client, factoryAddress, params.contract, params.token_id);
     const setContract = await client.contract.at(setAddress);
-    const op = await setContract.methodsObject.default!(params.txns).send();
+    const op = await sendSaplingOpCapped(client, setContract.methodsObject.default!(params.txns), 'user_tx');
     onBroadcast?.(op.hash);
     await op.confirmation(confirmations);
     return op.hash;
