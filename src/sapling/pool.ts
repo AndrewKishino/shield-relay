@@ -5,9 +5,10 @@ import { ShieldBridgeSDK } from 'shield-bridge-sdk';
 import type { Config } from '../config/schema.js';
 
 export interface WorkerSecret {
-  saplingAddress: string;
   saplingMnemonic: string;
   tezosSecretKey: string;
+  /** Optional — derived authoritatively from the mnemonic at start if absent. */
+  saplingAddress?: string;
 }
 export interface PoolSecrets {
   addresses: WorkerSecret[];
@@ -70,7 +71,11 @@ export async function buildPool(cfg: Config, secrets: PoolSecrets): Promise<Work
     });
     await sdk.ready;
 
-    workers.push({ index: i, saplingAddress: s.saplingAddress, tezosAddress, sdk, client });
+    // Derive the sapling payment address authoritatively from the mnemonic
+    // (never trust a possibly-stale stored value).
+    const saplingAddress = await sdk.getShieldedAddress();
+
+    workers.push({ index: i, saplingAddress, tezosAddress, sdk, client });
   }
   if (workers.length === 0) throw new Error('Pool is empty after build.');
   return workers;
