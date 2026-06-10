@@ -27,9 +27,10 @@ if [ "$CMD" = "start" ]; then
     node /opt/sapling-params-server.mjs &
   PARAMS_PID=$!
 
-  # If the relay exits/drains, take the params server down with it. Trap forwards
-  # signals so a `docker stop` cleanly tears both down (tini already forwarded the
-  # signal here; the relay's own handler does the graceful drain before exiting).
+  # Clean up the params server if BOOT FAILS before the exec below (e.g. the
+  # readiness loop gives up). NOTE: once `exec` replaces this shell, this trap is
+  # gone — steady-state teardown is handled by `tini -g` (Dockerfile ENTRYPOINT),
+  # which signals the whole process group, including the backgrounded params server.
   trap 'kill "$PARAMS_PID" 2>/dev/null || true' EXIT INT TERM
 
   # Wait until the loopback server answers before starting the relay, so the first
@@ -49,4 +50,7 @@ fi
 
 # exec so the relay inherits this PID and receives tini's forwarded signals
 # directly (graceful drain: stop intake -> finish in-flight -> release lock -> exit).
-exec node dist/cli/index.js "$@"
+# Pass --import EXPLICITLY (not just via NODE_OPTIONS) so a user's .env that clears
+# or overrides NODE_OPTIONS can never silently break the SDK's worker isolate — the
+# shim install is LOAD-BEARING (see src/runtime/saplingRequireShim.ts).
+exec node --import=file:///app/dist/runtime/saplingRequireShim.js dist/cli/index.js "$@"

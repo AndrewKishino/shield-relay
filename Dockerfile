@@ -84,6 +84,7 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev \
  && test -f node_modules/better-sqlite3/build/Release/better_sqlite3.node \
+ && test -f node_modules/comlink/dist/umd/node-adapter.js \
  && npm cache clean --force
 
 # -----------------------------------------------------------------------------
@@ -180,6 +181,8 @@ STOPSIGNAL SIGTERM
 # tini as PID-1 (forwards signals + reaps zombies from sapling worker_threads) ->
 # entrypoint.sh (starts the loopback params server for `start`, then exec's the
 # relay so it inherits tini's forwarded signals for a graceful drain).
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+# -g signals the whole PROCESS GROUP, so SIGTERM reaches BOTH the exec'd relay AND
+# the backgrounded params server (after exec the shell trap is gone — see entrypoint).
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/entrypoint.sh"]
 # Default to the server. Override (e.g. `init`, `doctor`, `jobs`) at `docker run`.
 CMD ["start"]

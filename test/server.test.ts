@@ -44,8 +44,29 @@ describe('buildServer (boot + hook ordering)', () => {
     const readyzAfter = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(readyzAfter.status).toBe(200);
 
-    // /metrics renders via the injected metrics registry.
+    // /metrics is default-DENY (no token configured in this build) → 404, never
+    // leaking per-worker gas/queue metadata on an unauthenticated ingress.
     const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
-    expect(metrics.status).toBe(200);
+    expect(metrics.status).toBe(404);
+  });
+
+  it('/metrics is token-gated when METRICS_TOKEN is set (404 off → 401 bad → 200 bearer)', async () => {
+    const app = await buildServer({
+      processor: stubProcessor,
+      wsHub: stubWsHub,
+      metrics: stubMetrics,
+      metricsToken: 's3cret',
+      isReady: () => true,
+    });
+    close = () => app.close();
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as AddressInfo).port;
+
+    const noAuth = await fetch(`http://127.0.0.1:${port}/metrics`);
+    expect(noAuth.status).toBe(401);
+    const badAuth = await fetch(`http://127.0.0.1:${port}/metrics`, { headers: { authorization: 'Bearer nope' } });
+    expect(badAuth.status).toBe(401);
+    const ok = await fetch(`http://127.0.0.1:${port}/metrics`, { headers: { authorization: 'Bearer s3cret' } });
+    expect(ok.status).toBe(200);
   });
 });

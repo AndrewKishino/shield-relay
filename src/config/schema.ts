@@ -62,6 +62,10 @@ export const ConfigSchema = z
     RETAIN_CLIENT_IPS: bool.default('false'),
 
     ALERT_WEBHOOK_URL: z.string().url().optional(),
+    // /metrics is OFF by default (privacy relay: per-worker gas + queue depth are
+    // deanonymization-relevant metadata). Set a token to enable it; scrapers then
+    // pass `Authorization: Bearer <token>`.
+    METRICS_TOKEN: z.string().min(1).optional(),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .transform((c) => ({

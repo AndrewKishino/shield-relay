@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// NOTE: the SDK's worker-spawn needs `require` in BOTH the main thread AND its
-// worker_threads. A static import here only reaches the main thread, so the real
-// fix is a `--import=dist/runtime/saplingRequireShim.js` preload (set via
-// NODE_OPTIONS in the image / the npm "start" script) which loads into every
-// isolate. See src/runtime/saplingRequireShim.ts.
+// Installs a global `require` for the SDK's eval('require'). This static import only
+// reaches THIS (main) isolate — enough for a bare `node dist/cli/index.js` / global
+// `relay` bin launch. The spawned Sapling worker_threads are SEPARATE isolates that
+// only a `--import` preload reaches, so `relay start`'s worker still needs the
+// NODE_OPTIONS/--import wiring (image ENV, the entrypoint exec, and `npm start`).
+import '../runtime/saplingRequireShim.js';
 import { Command } from 'commander';
 import { start } from './start.js';
 import { init } from './init.js';

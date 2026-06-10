@@ -12,6 +12,9 @@ export interface ServerDeps {
   processor: Processor;
   wsHub: WsHub;
   metrics: Metrics;
+  /** When unset, /metrics is disabled (404). When set, scrapers must send
+   *  `Authorization: Bearer <token>`. Keeps per-worker gas/queue metadata private. */
+  metricsToken?: string | undefined;
   isReady: () => boolean;
 }
 
@@ -39,7 +42,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   registerHealth(app, deps.isReady);
   registerRoutes(app, deps.processor);
-  app.get('/metrics', async (_req, reply) => {
+  // /metrics: default-deny. Disabled (404) unless METRICS_TOKEN is set; then a
+  // matching bearer token is required. Prevents a public ingress from leaking
+  // per-worker gas balance + queue depth (privacy-relevant metadata).
+  app.get('/metrics', async (req, reply) => {
+    if (!deps.metricsToken) {
+      reply.code(404);
+      return reply.send();
+    }
+    if (req.headers.authorization !== `Bearer ${deps.metricsToken}`) {
+      reply.code(401);
+      return reply.send();
+    }
     reply.header('content-type', deps.metrics.contentType);
     return reply.send(await deps.metrics.render());
   });
