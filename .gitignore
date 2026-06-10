@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# runtime data + secrets (NEVER commit)
+data/
+*.db
+*.db-*
+secrets/
+pool.json
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# sapling proving params (baked into image at build, not committed)
+params/
+
+# logs / os
+*.log
+.DS_Store
+coverage/

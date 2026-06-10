@@ -1,0 +1,26 @@
+{
+  "name": "shield-relay",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Self-hostable privacy relay for Shield Bridge — broadcasts Tezos Sapling transactions for a fee, anonymously. One container, run it anywhere.",
+  "license": "MIT",
+  "author": "Andrew Kishino",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "relay": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli/index.js start",
+    "dev": "tsx src/cli/index.ts start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "//deps": "shield-bridge-sdk, @tezos-x/octez.js, @tezos-x/octez.js-signer, fastify, ws, better-sqlite3, zod, pino, commander, prom-client — added during scaffold (deferred; see DESIGN.md §tech-stack)"
+}
