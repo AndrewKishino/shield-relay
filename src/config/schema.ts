@@ -31,12 +31,12 @@ export const ConfigSchema = z
     TEZOS_RPC_URL: z.string().url().optional(),
     SHIELD_BRIDGE_CONTRACT: z.string().optional(),
 
-    PAYMENT_AMOUNT_MUTEZ: z.coerce.bigint().default(1_000_000n),
+    PAYMENT_AMOUNT_MUTEZ: z.coerce.bigint().nonnegative().default(1_000_000n),
 
     // Quantized fee schedule (FEE_SCHEDULE.md). Defaults reproduce the flat fee
     // EXACTLY (ships dark): base=PAYMENT_AMOUNT (resolved below), perTx=0, quantum=1,
     // legacy cap off. Operators opt in with the recommended 250k/150k/250k + cap=5.
-    FEE_BASE_MUTEZ: z.coerce.bigint().optional(),
+    FEE_BASE_MUTEZ: z.coerce.bigint().nonnegative().optional(),
     FEE_PER_TX_MUTEZ: z.coerce.bigint().nonnegative().default(0n),
     FEE_QUANTUM_MUTEZ: z.coerce.bigint().positive().default(1n),
     LEGACY_FLAT_MAX_TXS: z.coerce.number().int().nonnegative().default(0), // 0 = no cap
@@ -88,6 +88,12 @@ export const ConfigSchema = z
       quantumMutez: c.FEE_QUANTUM_MUTEZ,
     },
     legacyFlatMaxTxs: c.LEGACY_FLAT_MAX_TXS,
-  }));
+  }))
+  // A non-positive effective base would make every quote ≤ 0, turning Phase-1
+  // verification (received >= quoted) vacuously true → free injection. Reject at load.
+  .refine((c) => c.fee.baseMutez > 0n, {
+    message:
+      'Effective fee base must be > 0 (set FEE_BASE_MUTEZ or PAYMENT_AMOUNT_MUTEZ > 0) — a non-positive base disables payment verification.',
+  });
 
 export type Config = z.infer<typeof ConfigSchema>;

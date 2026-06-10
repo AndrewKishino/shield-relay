@@ -28,6 +28,15 @@ export async function start(): Promise<void> {
     'shield-relay starting',
   );
 
+  // The schedule prices per-tx, but legacy (no-txCount) clients still pay flat — if
+  // their batch isn't capped, the griefing vector the schedule exists to close stays
+  // open for the common case. Warn so the operator wires LEGACY_FLAT_MAX_TXS.
+  if (cfg.fee.perTxMutez > 0n && cfg.legacyFlatMaxTxs === 0) {
+    logger.warn(
+      'Fee schedule active but LEGACY_FLAT_MAX_TXS=0: legacy clients can still submit large batches at the flat fee. Set LEGACY_FLAT_MAX_TXS (e.g. 5) to close it.',
+    );
+  }
+
   // P1: SQLite only. Postgres (DATABASE_URL) adapter is P4.
   const store = new SqliteStore(join(cfg.DATA_DIR, 'relay.db'));
   store.init();

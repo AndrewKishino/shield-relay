@@ -18,6 +18,10 @@ import { readCounter, broadcastAlreadyLanded } from './reconcile.js';
 const HEX = /^[0-9a-fA-F]+$/;
 const MAX_TXN_HEX = 100_000;
 const MAX_TX_COUNT = 256; // sanity bound on a fee quote request
+// Hard backstop on sapling txns the relay will inject in ONE Phase-2 op, independent
+// of the fee config. The client's BATCH_MAX_ITEMS is 10; this leaves headroom for
+// note-management splits while bounding worst-case storage-burn loss from abuse.
+const MAX_INJECT_TXS = 32;
 
 export interface ProcessorDeps {
   config: Config;
@@ -102,7 +106,11 @@ export class Processor {
     if (job.status !== 'info_generated') {
       throw new HttpError(409, `Invalid job status: ${job.status}. Already submitted?`);
     }
-    this.validateTxns(payment?.txns);
+    // A legitimate Phase-1 payment is EXACTLY one shielded transfer to the worker
+    // (client: generatePaymentParams → one tx). Capping at 1 stops a griefer from
+    // stuffing extra sapling txns into the payment for the relay to broadcast at
+    // storage-burn cost while only the memo'd value is credited.
+    this.validateTxns(payment?.txns, 1);
 
     const taskId = randomUUID();
     const seq = this.d.store.enqueueWork(
@@ -132,12 +140,18 @@ export class Processor {
       throw new HttpError(409, `Payment not confirmed yet (status: ${job.status}).`);
     }
     const arr = Array.isArray(userTransaction) ? userTransaction : [userTransaction];
-    for (const t of arr) this.validateTxns(t?.txns);
+    for (const t of arr) this.validateTxns(t?.txns, MAX_INJECT_TXS);
+
+    const actualTxCount = arr.reduce((acc, t) => acc + (Array.isArray(t?.txns) ? t.txns.length : 0), 0);
+    // Hard absolute backstop, independent of fee config (stops a cost-bomb even on
+    // a dark/legacy relay with no economic cap configured).
+    if (actualTxCount > MAX_INJECT_TXS) {
+      throw new HttpError(400, `Batch too large: ${actualTxCount} sapling txns exceeds the ${MAX_INJECT_TXS} hard limit.`);
+    }
 
     // Enforce the paid fee covers the submitted size — BEFORE injection, so a
     // quote-1-submit-10 dodge is rejected without spending the relay's gas. The
     // fee was already paid (Phase 1), so a too-low quote forfeits it (FEE_SCHEDULE §3.3).
-    const actualTxCount = arr.reduce((acc, t) => acc + (Array.isArray(t?.txns) ? t.txns.length : 0), 0);
     const check = checkSubmittedTxCount(
       actualTxCount,
       { legacyQuote: Boolean(job.legacyQuote), quotedTxCount: job.quotedTxCount },
@@ -301,9 +315,12 @@ export class Processor {
     if (check === 'mismatch') throw new HttpError(403, 'Invalid job secret.');
   }
 
-  private validateTxns(txns: unknown): void {
+  private validateTxns(txns: unknown, maxTxns: number): void {
     if (!Array.isArray(txns) || txns.length === 0) {
       throw new HttpError(400, 'Transaction must include a non-empty txns array.');
+    }
+    if (txns.length > maxTxns) {
+      throw new HttpError(400, `Too many sapling txns in one operation (${txns.length} > ${maxTxns}).`);
     }
     for (const t of txns) {
       if (typeof t !== 'string' || t.length === 0 || t.length > MAX_TXN_HEX || !HEX.test(t)) {

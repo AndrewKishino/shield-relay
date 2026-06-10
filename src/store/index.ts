@@ -35,8 +35,9 @@ export interface JobRow {
   errorMessage: string | null;
   createdAt: number;
   expiresAt: number;
-  /** Binding fee (mutez) Phase 1 must clear. Durable — survives restart. */
-  quotedFeeMutez: number;
+  /** Binding fee (mutez) Phase 1 must clear. Durable — survives restart. NULL only on
+   *  rows migrated from before the fee schedule (the processor falls back to the flat amount). */
+  quotedFeeMutez: number | null;
   /** Max sapling txns Phase 2 may submit; null for a legacy flat quote. */
   quotedTxCount: number | null;
   /** 1 if quoted the legacy flat fee (no txCount sent); 0 if scheduled. */

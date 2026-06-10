@@ -129,6 +129,19 @@ the processor passes the job's stored `quotedFeeMutez` instead of the global
 `actualTxCount > job.quotedTxCount`. This closes the obvious dodge (quote for 1,
 submit 10).
 
+Two **fee-config-independent** invariants back this up (they hold even on a dark
+relay, so under-pricing can't be turned into unbounded loss):
+- **Phase 1 is capped at exactly one sapling tx** — a legitimate payment is a single
+  shielded transfer to the worker, so extra txns stuffed into the *payment* (which the
+  relay would broadcast at storage cost while only the memo'd value is credited) are
+  rejected.
+- **Phase 2 has a hard absolute cap** (`MAX_INJECT_TXS`, currently 32) on total
+  submitted txns, independent of the fee schedule — a backstop against a cost-bomb that
+  the per-config `LEGACY_FLAT_MAX_TXS` (off by default) doesn't cover.
+
+A non-positive effective fee base is also rejected at config load (it would make
+`received ≥ quoted` vacuously true — free injection).
+
 **The cost of a mis-quote falls on the client, and there is no top-up.** By Phase 2
 the user has already paid Phase 1 — the memo is consumed and the job is
 `payment_confirmed`. The single-payment-per-job model has no channel to add to an
@@ -269,7 +282,14 @@ state; the user-facing price drop follows whenever the client ships.
    (`sum(txns.length)`), since storage burn scales with those and the relay
    enforces on exactly that count. Note-management splits count toward it; the
    client builds the params, so it always knows the number before it pays.
-4. **Quote TTL.** The quote is pinned to the job row and jobs already expire
+4. **Enabling `LEGACY_FLAT_MAX_TXS` mid-flight.** A legacy job already
+   `payment_confirmed` under no cap, whose Phase-2 batch exceeds a cap the operator
+   enables before it submits, is rejected — forfeiting the already-paid fee. The
+   window is narrow (a config change during one job's Phase-1→Phase-2 gap) and the
+   absolute `MAX_INJECT_TXS` backstop is *not* runtime-toggled, so it never surprises
+   in-flight jobs. Recommendation: enable the legacy cap during low traffic; no
+   grandfather mechanism in v1.
+5. **Quote TTL.** The quote is pinned to the job row and jobs already expire
    (`JOB_TTL_SECONDS`); no separate quote expiry is needed unless schedule
    changes mid-flight become common. Recommendation: schedule changes only
    apply to new jobs; stored quotes are honored until job expiry.
