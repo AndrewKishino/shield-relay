@@ -43,14 +43,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     reply.header('content-type', deps.metrics.contentType);
     return reply.send(await deps.metrics.render());
   });
-  await app.ready();
 
+  // Bolt a `ws` server onto the same http server. The onClose hook MUST be added
+  // BEFORE app.ready() — Fastify throws FST_ERR_INSTANCE_ALREADY_LISTENING on any
+  // addHook once the instance has started (ready() flips that state, not listen()).
   const wss = new WebSocketServer({ noServer: true });
-  app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    wss.handleUpgrade(req, socket, head, (ws) => deps.wsHub.handleConnection(ws));
-  });
   app.addHook('onClose', async () => {
     wss.close();
+  });
+
+  await app.ready();
+
+  app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    wss.handleUpgrade(req, socket, head, (ws) => deps.wsHub.handleConnection(ws));
   });
 
   return app;

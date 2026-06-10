@@ -17,8 +17,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/cli/index.js start",
-    "dev": "tsx src/cli/index.ts start",
+    "start": "node --import=./dist/runtime/saplingRequireShim.js dist/cli/index.js start",
+    "dev": "tsx --import=./src/runtime/saplingRequireShim.ts src/cli/index.ts start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
