@@ -1,0 +1,50 @@
+# shield-relay — Caddy reverse proxy (optional `tls` profile).
+#
+# Caddy auto-provisions and renews a Let's Encrypt certificate for $DOMAIN and
+# proxies everything — including WebSocket upgrades — to the relay container.
+# Caddy handles WS transparently; no special directive is required.
+#
+# ── With a domain (recommended) ─────────────────────────────────────────────
+#   In .env:  DOMAIN=relay.example.com
+#   Point an A/AAAA record at this host, open ports 80 + 443, then:
+#       docker compose --profile tls up -d
+#   Caddy fetches a real cert on first request. Nothing else to do.
+#
+# ── No domain / homelab ─────────────────────────────────────────────────────
+#   Option A (simplest): DON'T run Caddy. Drop the `--profile tls` flag and
+#       reach the relay over plain HTTP on :8080 (it's published by the relay
+#       service). Fine on a trusted LAN / behind a VPN like Tailscale.
+#   Option B: set  DOMAIN=:443  in .env to make Caddy serve HTTPS with its OWN
+#       internal CA (self-signed). Clients must trust Caddy's root CA, or the
+#       Shield Bridge app must be told to ignore the cert. Good for testing.
+#
+# {$DOMAIN} expands from the environment (passed via env_file in compose).
+
+{$DOMAIN} {
+	# Forward to the relay service on the compose network. reverse_proxy
+	# upgrades Connection/Upgrade headers automatically, so WS just works.
+	reverse_proxy relay:8080 {
+		# Surface the real client IP to the relay's rate limiter / logs.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+
+		# Don't let a slow proof-generation request get killed mid-flight; the
+		# relay drains in-flight work on shutdown, so keep the pipe open.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	# Let the relay own /healthz, /readyz, /metrics — but you may want to keep
+	# /metrics off the public internet. Uncomment to block it at the edge:
+	# @metrics path /metrics
+	# respond @metrics 404
+
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+}

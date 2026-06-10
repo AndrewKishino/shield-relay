@@ -1,0 +1,96 @@
+# Build + publish the multi-arch shield-relay image to GHCR.
+#
+# Pushes linux/amd64 + linux/arm64 under a single manifest list so
+# `docker pull ghcr.io/andrewkishino/shield-relay` resolves the right arch
+# automatically. Native compiles are NOT on the critical path: the only native
+# addon (better-sqlite3) ships glibc prebuilds for node-v127 on both arches, and
+# the Sapling proving core is WebAssembly (arch-independent) — so the amd64 leg
+# under QEMU only runs npm/tsc/prebuild-install (pure JS), never gcc.
+name: release
+
+on:
+  push:
+    tags: ["v*"]          # cut a release by pushing a version tag
+    branches: ["main"]    # :edge on every main push
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }} # andrewkishino/shield-relay
+
+permissions:
+  contents: read
+  packages: write          # push to GHCR
+  id-token: write          # cosign keyless signing
+  attestations: write      # build provenance attestation
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU lets the amd64 runner emulate arm64 for that leg of the build.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch,suffix=-edge
+            type=edge,branch=main
+            type=sha,format=long
+          # Mark the default branch build as :latest only on a tagged release.
+          flavor: |
+            latest=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build + push (linux/amd64, linux/arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true     # SLSA build provenance in the manifest
+          sbom: true           # attach an SBOM
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache layers in GHA so the ~49 MB params + deps don't refetch.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Cryptographically sign the pushed digest (keyless / OIDC).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign the image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in ${TAGS}; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      # Build provenance attestation for supply-chain verification.
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

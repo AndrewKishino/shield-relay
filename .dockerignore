@@ -1,0 +1,44 @@
+# Keep the build context tiny + NEVER leak secrets into image layers.
+
+# Dependencies + build output (rebuilt inside the image)
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# SECRETS — must never enter the build context, let alone an image layer.
+secrets/
+pool.json
+*.pem
+*.key
+.env
+.env.*
+
+# Runtime data (SQLite WAL etc.) — provided as a runtime volume, not baked.
+data/
+*.db
+*.db-*
+params/
+
+# VCS + local tooling
+.git/
+.gitignore
+.github/
+*.log
+.DS_Store
+
+# Tests + dev-only files (not needed to build the runtime image)
+test/
+vitest.config.ts
+**/*.test.ts
+
+# Docs (not needed in build context)
+DESIGN.md
+docs/
+README.md
+deploy/README.md
+
+# Compose / local-only artifacts (not part of the image build)
+docker-compose.yml
+docker-compose.override.yml
+.env.example

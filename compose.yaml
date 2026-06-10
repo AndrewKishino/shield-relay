@@ -1,0 +1,140 @@
+# shield-relay — Docker Compose deployment
+#
+# One command for a VPS or homelab:
+#
+#     docker compose up -d            # relay only, port 8080 exposed
+#     docker compose --profile tls up -d   # relay + Caddy (auto-HTTPS for $DOMAIN)
+#
+# All tunables live in ./.env (copy .env.example → .env first).
+# Secrets (pool.json) are mounted READ-ONLY from ./secrets and are NEVER baked
+# into the image. relay.db lives in a named LOCAL volume (WAL needs local FS).
+#
+# Compose Spec — no top-level `version:` key (obsolete; ignored by modern Docker).
+
+services:
+  relay:
+    image: ${RELAY_IMAGE:-ghcr.io/andrewkishino/shield-relay:latest}
+    # Pin to a digest in production for reproducibility, e.g.:
+    #   RELAY_IMAGE=ghcr.io/andrewkishino/shield-relay@sha256:<digest>
+    container_name: shield-relay
+    restart: unless-stopped
+
+    # PID 1 = an init that reaps zombies AND forwards SIGTERM to node, so the
+    # drain handlers in start.ts (stop intake → finish in-flight → release lock)
+    # actually run on `docker stop` / `compose down`. The image already bundles
+    # tini as PID-1; init: true is belt-and-suspenders.
+    init: true
+
+    # Give the graceful drain room to finish before Docker escalates to SIGKILL.
+    # MUST exceed DRAIN_TIMEOUT_MS (default 120000). If SIGKILL hits mid-drain the
+    # SQLite instance lock is not released and the next boot stalls ~60s (STALE_MS)
+    # to reclaim it, and any in-flight phase-2 inject is left for boot rehydrate.
+    stop_grace_period: 130s
+    stop_signal: SIGTERM
+
+    # The relay reads ONLY process.env (no dotenv). env_file injects every knob.
+    env_file:
+      - .env
+
+    # SAPLING_PARAMS_URL is set INSIDE the image — the params are baked AND served
+    # on a loopback HTTP server (Node 22 fetch() can't read file:// URLs, which is
+    # how the SDK loads them), so the operator must NOT set it. DATA_DIR is fixed
+    # to the volume mount; POOL_FILE points at the read-only secret mount.
+    environment:
+      DATA_DIR: /data
+      POOL_FILE: /run/secrets/pool.json
+
+    volumes:
+      # relay.db (SQLite WAL) — MUST be a local-fs volume. A networked FS
+      # corrupts the WAL and defeats the single-writer instance lock.
+      - relay-data:/data
+      # Worker keys — provided at RUNTIME, read-only, never in any image layer.
+      - ./secrets/pool.json:/run/secrets/pool.json:ro
+
+    # Homelab path: publish 8080 directly (skip the `tls` profile / Caddy).
+    # If you front the relay with the Caddy service below, you can REMOVE this
+    # block so only Caddy is internet-facing.
+    ports:
+      - "${RELAY_BIND:-0.0.0.0}:${HOST_PORT:-8080}:8080"
+
+    healthcheck:
+      # /readyz is 200 only after the pool is built and not draining. Uses node's
+      # built-in fetch (no external binary needed; matches the image HEALTHCHECK
+      # style). PORT is fixed to 8080 in-container. ~180s start_period because
+      # building the pool loads ~50 MB of Sapling params per worker AND derives
+      # each worker's shielded address.
+      # NOTE: /readyz returns 503 during the graceful drain, so on `docker stop`
+      # the container briefly shows (unhealthy) for the drain window. That is
+      # cosmetic — restart: unless-stopped does NOT restart on unhealthy. Do not
+      # wire an external restart-on-unhealthy watchdog to /readyz.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
+    # Each ACTIVE worker pins a full Sapling proving context (~1.2–1.5 GB RAM).
+    # Defaults below are sized for WORKER_COUNT=1. For N workers, raise the
+    # reservation/limit to ≈ 1.5 GB × N (+ ~0.5 GB headroom for node/sqlite).
+    mem_reservation: ${MEM_RESERVATION:-1500m}
+    mem_limit: ${MEM_LIMIT:-2g}
+    # Give the WASM prover headroom before the OOM killer fires.
+    oom_kill_disable: false
+
+    # Defence in depth — the relay never writes outside /data, and pool.json is
+    # mounted ro. A read-only rootfs + tmpfs keeps a compromised process boxed in.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # OPTIONAL reverse proxy. Only starts with `--profile tls`.
+  # Caddy terminates TLS and proxies to relay:8080. WebSocket upgrades pass
+  # through automatically (Caddy needs no special config for WS).
+  #
+  #   • Have a domain  → set DOMAIN=relay.example.com in .env, open 80+443,
+  #                      Caddy gets a real Let's Encrypt cert automatically.
+  #   • No domain      → set DOMAIN=:443 (or an internal name); Caddy serves its
+  #                      own internal CA cert. See the Caddyfile header.
+  # ───────────────────────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: shield-relay-caddy
+    restart: unless-stopped
+    profiles: ["tls"]
+    depends_on:
+      relay:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data    # certs + ACME account (persist across restarts!)
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  relay-data:
+    driver: local        # local-fs only — see WAL note above
+  caddy-data:
+  caddy-config:
