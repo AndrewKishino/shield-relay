@@ -4,12 +4,10 @@ import { InMemorySigner } from '@tezos-x/octez.js-signer';
 import type { Config } from '../config/schema.js';
 
 export interface WorkerSecret {
-  /** tz1 secret key — the worker signs, pays gas, and receives fees with this. */
+  /** tz1 secret key — the worker signs, pays gas, and receives fees with this. Under the
+   *  unshield-payment model that's all a worker is. (Old pool files may also carry a
+   *  vestigial `saplingMnemonic`/`saplingAddress`; those are simply ignored at load.) */
   tezosSecretKey: string;
-  /** Vestigial under the unshield-payment model (workers never touch a sapling account).
-   *  Accepted for back-compat with existing pool files; ignored at runtime. */
-  saplingMnemonic?: string;
-  saplingAddress?: string;
 }
 export interface PoolSecrets {
   addresses: WorkerSecret[];

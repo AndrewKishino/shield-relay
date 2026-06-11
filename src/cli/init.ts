@@ -11,12 +11,13 @@ export interface InitOptions {
 }
 
 /**
- * `relay init` — mint a fresh worker pool OFFLINE. Each worker gets an independent
- * Sapling account (24-word mnemonic) and an independent Tezos signing key. Writes
- * the pool secret at 0600 and prints the tz1 gas-funding addresses.
+ * `relay init` — mint a fresh worker pool OFFLINE. Each worker is just an independent
+ * Tezos signing key (tz1) — under the unshield-payment model a worker only broadcasts
+ * ops and receives fees, so it needs no Sapling account. Writes the pool secret at 0600
+ * and prints the tz1 gas-funding addresses.
  *
- * Cold-start gas is manual: the self-funding loop only kicks in after the first
- * fee, so each tz1 must be funded once.
+ * Cold-start gas is manual: each tz1 must be funded once; after that fees land directly
+ * on the worker tz1 (the relay never moves funds itself).
  */
 export async function init(opts: InitOptions): Promise<void> {
   if (opts.workers < 1) throw new Error('--workers must be >= 1');
@@ -30,12 +31,11 @@ export async function init(opts: InitOptions): Promise<void> {
   const funding: { index: number; tz1: string }[] = [];
 
   for (let i = 0; i < opts.workers; i++) {
-    const saplingMnemonic = generateMnemonic(256); // 24 words
-    const tezosMnemonic = generateMnemonic(256);
+    const tezosMnemonic = generateMnemonic(256); // 24 words
     const signer = await InMemorySigner.fromMnemonic({ mnemonic: tezosMnemonic });
     const tezosSecretKey = await signer.secretKey();
     const tz1 = await signer.publicKeyHash();
-    addresses.push({ saplingMnemonic, tezosSecretKey });
+    addresses.push({ tezosSecretKey });
     funding.push({ index: i, tz1 });
   }
 
