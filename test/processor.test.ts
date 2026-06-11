@@ -56,3 +56,33 @@ describe('Processor money gates', () => {
     expect(() => p.submitUserTransaction('job-1', undefined, items(6))).toThrow(/update your client/);
   });
 });
+
+/** Build a Processor with a custom getJob stub (for getStatus auth/not_found paths). */
+function statusProcessor(requireSecret: boolean, job: Partial<JobRow> | undefined): Processor {
+  return new Processor({
+    config: { REQUIRE_JOB_SECRET: requireSecret },
+    store: { getJob: () => job },
+  } as unknown as ConstructorParameters<typeof Processor>[0]);
+}
+
+describe('Processor.getStatus (poll fallback)', () => {
+  it('returns the wire status + op hash for an authorized job', () => {
+    const f = makeProcessor({ status: 'completed', userTxHash: 'opXYZ' }).getStatus('job-1', undefined);
+    expect(f).toEqual({ jobId: 'job-1', status: 'completed', operationHash: 'opXYZ', userTxHash: 'opXYZ' });
+  });
+
+  it('returns not_found for an unknown jobId', () => {
+    expect(statusProcessor(false, undefined).getStatus('nope', undefined).status).toBe('not_found');
+  });
+
+  it('returns not_found (unauthorized) on a wrong jobSecret', () => {
+    const p = statusProcessor(true, { jobSecretHash: 'deadbeef', status: 'completed' });
+    const f = p.getStatus('job-1', 'wrong-secret');
+    expect(f.status).toBe('not_found');
+    expect(f.error).toBe('unauthorized');
+  });
+
+  it('returns not_found for a pre-payment info_generated job (matches the WS)', () => {
+    expect(makeProcessor({ status: 'info_generated' }).getStatus('job-1', undefined).status).toBe('not_found');
+  });
+});

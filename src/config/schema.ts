@@ -69,6 +69,14 @@ export const ConfigSchema = z
     RATE_LIMIT_RPM: z.coerce.number().int().positive().default(120),
     MAX_CONNECTIONS: z.coerce.number().int().positive().default(2000),
     WS_HEARTBEAT_MS: z.coerce.number().int().positive().default(30_000),
+    // WebSocket upgrades are accepted ONLY on this path (the client connects to the relay
+    // root, so '/' by default) — random-path upgrade probes are rejected. Set if a proxy
+    // rewrites the WS path.
+    WS_PATH: z.string().default('/'),
+    // Optional comma-separated Origin allowlist for WS upgrades. EMPTY = allow any origin
+    // (the default — the web client deploys to many origins: IPFS gateways, custom domains).
+    // Set it only for a single-origin deployment.
+    WS_ALLOWED_ORIGINS: z.string().default(''),
     // Set true ONLY behind a trusted reverse proxy (e.g. the compose Caddy) so the
     // rate limiter keys on X-Forwarded-For. Leave false when 8080 is exposed directly
     // (else a client could spoof XFF to dodge the per-IP limit).

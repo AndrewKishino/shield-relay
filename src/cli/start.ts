@@ -79,6 +79,8 @@ export async function start(): Promise<void> {
     maxConnections: cfg.MAX_CONNECTIONS,
     wsHeartbeatMs: cfg.WS_HEARTBEAT_MS,
     trustProxy: cfg.TRUST_PROXY,
+    wsPath: cfg.WS_PATH,
+    wsAllowedOrigins: cfg.WS_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
     isReady: () => ready,
   });
   await app.listen({ port: cfg.PORT, host: '0.0.0.0' });

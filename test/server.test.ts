@@ -31,6 +31,8 @@ describe('buildServer (boot + hook ordering)', () => {
       maxConnections: 2000,
       wsHeartbeatMs: 30_000,
       trustProxy: false,
+      wsPath: "/",
+      wsAllowedOrigins: [],
       isReady: () => ready,
     });
     close = () => app.close();
@@ -64,6 +66,8 @@ describe('buildServer (boot + hook ordering)', () => {
       maxConnections: 2000,
       wsHeartbeatMs: 30_000,
       trustProxy: false,
+      wsPath: "/",
+      wsAllowedOrigins: [],
       isReady: () => true,
     });
     close = () => app.close();

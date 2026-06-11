@@ -27,6 +27,10 @@ export interface ServerDeps {
   wsHeartbeatMs: number;
   /** Trust X-Forwarded-For for req.ip (rate-limit keying) — true ONLY behind a proxy. */
   trustProxy: boolean;
+  /** WS upgrades are accepted only on this path (default '/'); others are rejected. */
+  wsPath: string;
+  /** Optional Origin allowlist for WS upgrades. Empty ⟹ any origin (multi-origin client). */
+  wsAllowedOrigins: string[];
   isReady: () => boolean;
 }
 
@@ -111,6 +115,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.ready();
 
   app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Reject upgrades on unexpected paths — a random-path probe with an Upgrade header
+    // shouldn't open a socket. The client connects to the relay root, so default '/'.
+    const pathname = (req.url ?? '/').split('?')[0];
+    if (pathname !== deps.wsPath) {
+      socket.destroy();
+      return;
+    }
+    // Optional Origin allowlist (off by default — the web client deploys to many origins).
+    if (deps.wsAllowedOrigins.length > 0) {
+      const origin = req.headers.origin;
+      if (!origin || !deps.wsAllowedOrigins.includes(origin)) {
+        socket.destroy();
+        return;
+      }
+    }
     // Hard cap concurrent sockets — bounds an unauthenticated upgrade-flood DoS.
     if (wss.clients.size >= deps.maxConnections) {
       socket.destroy();

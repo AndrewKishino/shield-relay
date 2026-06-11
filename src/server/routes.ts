@@ -14,8 +14,8 @@ interface SubmitUserTxBody {
   userTransaction: ContractParams | ContractParams[];
 }
 
-/** The three `shield-relay/1` REST endpoints. Responses use `{ data }` so the
- *  existing client's `json.data ?? json` parsing works unchanged. */
+/** The `shield-relay/1` REST endpoints. Responses use `{ data }` so the existing
+ *  client's `json.data ?? json` parsing works unchanged. */
 export function registerRoutes(app: FastifyInstance, processor: Processor): void {
   app.post('/get-worker-info', async (req, reply) => {
     try {
@@ -24,6 +24,16 @@ export function registerRoutes(app: FastifyInstance, processor: Processor): void
     } catch (e) {
       return sendError(reply, e);
     }
+  });
+
+  // Read-only status poll — a fallback for when the WebSocket can't connect (corp
+  // proxies, flaky networks). jobSecret travels in the `x-job-secret` header (not the
+  // URL, so it can't leak via access logs). Same auth + not_found semantics as the WS.
+  app.get('/status/:jobId', async (req, reply) => {
+    const { jobId } = req.params as { jobId: string };
+    const secret = req.headers['x-job-secret'];
+    const jobSecret = typeof secret === 'string' ? secret : undefined;
+    return reply.send({ success: true, data: processor.getStatus(jobId, jobSecret) });
   });
 
   app.post('/submit-payment', async (req, reply) => {

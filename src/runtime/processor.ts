@@ -8,7 +8,8 @@ import type { ContractParams } from '../core/types.js';
 import { WorkerQueue } from './workerQueue.js';
 import { WsHub } from '../server/wsHub.js';
 import { HttpError } from '../server/errors.js';
-import { frame } from '../server/statusFrames.js';
+import { frame, type StatusFrame } from '../server/statusFrames.js';
+import { toWireStatus } from '../core/jobs.js';
 import { generateJobSecret, generateMemo, hashJobSecret, checkJobSecret } from '../server/auth.js';
 import { broadcastPayment, verifyPaymentUnshield, verifyPaymentLanded, verifyPaymentLandedByScan, paymentDigest } from '../core/payment.js';
 import { injectUserTransaction } from '../core/inject.js';
@@ -100,6 +101,26 @@ export class Processor {
       },
       jobSecret,
     };
+  }
+
+  // ── GET /status/:jobId ─────────────────────────────────────────────────────
+  /**
+   * Read-only status, jobSecret-gated — a polling fallback for when the WebSocket is
+   * unavailable. Mirrors the WS (re)subscribe exactly: an unauthorized or unknown jobId
+   * gets `not_found` (revealing nothing more), and a pre-payment `info_generated` job is
+   * also `not_found` on the wire (matching the WS, which never replays that state).
+   */
+  getStatus(jobId: string, jobSecret: string | undefined): StatusFrame {
+    const job = this.d.store.getJob(jobId);
+    const check = checkJobSecret(jobSecret, job?.jobSecretHash, this.d.config.REQUIRE_JOB_SECRET);
+    if (check !== 'ok') return frame(jobId, 'not_found', { error: 'unauthorized' });
+    if (!job) return frame(jobId, 'not_found');
+    const wire = toWireStatus(job.status);
+    if (!wire) return frame(jobId, 'not_found');
+    return frame(jobId, wire, {
+      opHash: job.userTxHash ?? undefined,
+      error: job.errorMessage ?? undefined,
+    });
   }
 
   private parseTxCount(raw: unknown): number | undefined {
