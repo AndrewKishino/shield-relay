@@ -2,10 +2,12 @@
 
 **Status:** relay side IMPLEMENTED (ships dark — `src/core/feeSchedule.ts`, the quote
 at `get-worker-info`, Phase-1 verify against the stored quote, Phase-2 `txCount`
-enforcement). The empirical `perTxMutez` sweep is DONE (§6.1 — recommended `perTxMutez`
-set to 175k) and the shield-bridge V3 client already honors the quoted `paymentAmount` +
-sends `txCount`, so the schedule is READY to enable: an operator opts in by setting the
-non-dark `FEE_*` env values. Companion to `DESIGN.md` (`shield-relay/1`).
+enforcement). The empirical sweep is DONE (§6.1) and the recommended values are sized for a
+**≥20% profit floor on the worst-observed (all-max-fragmentation) batch**: `baseMutez=300k`,
+`perTxMutez=270k`, `quantumMutez=250k`, `LEGACY_FLAT_MAX_TXS=5`. The shield-bridge V3 client
+already honors the quoted `paymentAmount` + sends `txCount`, so the schedule is READY to enable:
+an operator opts in by setting those `FEE_*` env values (defaults still reproduce the flat fee).
+Companion to `DESIGN.md` (`shield-relay/1`).
 
 > **⚠ Payment mechanics changed (2026-06) — option B.** The fee is no longer a *shielded*
 > transfer redeemed later by `refillWorkerGas`. It is now a **public unshield of the fee
@@ -70,8 +72,8 @@ code defaults reproduce today's flat fee exactly (§3.5):
 
 | Parameter | Value | Rationale |
 | --- | --- | --- |
-| `baseMutez` | 250_000 (0.25 XTZ) | covers Phase-1 payment injection + amortized fee-redemption leg + ops margin |
-| `perTxMutez` | 175_000 (0.175 XTZ) | ≈ p90 per-tx cost from the §6.1 mainnet sweep (storage burn p50 0.085 / p90 0.17 + gas); the heavy tail is real, so this isn't underwater on multi-input ops |
+| `baseMutez` | 300_000 (0.30 XTZ) | ≥ 1.2 × the worst-observed Phase-1 payment op (~215k) — the per-job fixed cost; see §6.1 |
+| `perTxMutez` | 270_000 (0.27 XTZ) | ≥ 1.2 × the worst-observed per-tx cost (~215k) so an all-max-fragmentation batch still clears a ≥20% profit floor; see §6.1 for the dial |
 | `quantumMutez` | 250_000 (0.25 XTZ) | privacy quantization — see §4 |
 
 Resulting tier table (quantize **up**, never down):
@@ -179,7 +181,7 @@ schedule belongs in it:
 ```jsonc
 {
   "protocol": "shield-relay/1",
-  "feeSchedule": { "baseMutez": 250000, "perTxMutez": 175000, "quantumMutez": 250000 }
+  "feeSchedule": { "baseMutez": 300000, "perTxMutez": 270000, "quantumMutez": 250000 }
 }
 ```
 
@@ -195,8 +197,8 @@ schedule by setting the recommended values (§2).
 
 ```
                        DARK DEFAULT (= today)     RECOMMENDED (opt-in, §2)
-FEE_BASE_MUTEZ         = PAYMENT_AMOUNT_MUTEZ      250_000
-FEE_PER_TX_MUTEZ       = 0                         175_000  (§6.1 sweep)
+FEE_BASE_MUTEZ         = PAYMENT_AMOUNT_MUTEZ      300_000
+FEE_PER_TX_MUTEZ       = 0                         270_000  (§6.1: ≥20% profit floor)
 FEE_QUANTUM_MUTEZ      = 1   (no quantization)     250_000
 LEGACY_FLAT_MAX_TXS    = 0   (no cap)              5  (see §5)
 ```
@@ -302,19 +304,40 @@ known 10-asset relay batch (`ooRSpM5…`). Per-op figures:
 - **Phase-1 payment is itself a sapling unshield** (the fee → worker tz1), so it carries the
   same ~85k+ storage burn. `baseMutez` must cover it (it's the per-job fixed cost), not `perTxMutez`.
 
-**Recommendation (revised): `perTxMutez = 175,000`** (≈ the p90 per-tx cost), keep
-`baseMutez = 250,000` (covers the Phase-1 payment ~90k + op-group overhead + margin) and
-`quantumMutez = 250,000`. Worked fees: n=1 → 0.5, n=5 → 1.25, n=10 → 2.0 XTZ — all comfortably
-above realistic batch cost (n=10 typical ≈ 1.0 XTZ, n=10 heavy ≈ 1.8 XTZ). **Residual:** a
-pathological all-`max`-fragmentation 10-item batch (~2.15 XTZ cost) just exceeds the 2.0 XTZ
-fee; rare and bounded (MAX_INJECT_TXS + the per-op gas cap bound op size), and the base+quantum
-buffer absorbs all non-pathological cases. Tighten only if real all-heavy batches appear.
+**Sizing for a ≥20% profit floor (operator goal).** A job is `n+1` sapling ops (1 Phase-1
+payment + n Phase-2). Worst observed full per-op cost (storageFee + bakerFee) = **214,729 µtz**
+over the 50-op sweep, so an *all-max-fragmentation* batch costs `C(n) = 215k·(n+1)`. For
+`fee(n) ≥ 1.2·C(n) = 258k·(n+1)` at every n (the fee is linear in n, the cost too), both
+coefficients must clear 258k: **`baseMutez ≥ 258k` and `perTxMutez ≥ 258k`.**
+
+**Recommendation: `baseMutez = 300,000`, `perTxMutez = 270,000`, `quantumMutez = 250,000`,
+`LEGACY_FLAT_MAX_TXS = 5`.** Both clear 258k with margin, so ≥20% profit holds on the worst
+*observed* op for any n (quantization only adds). Worked fees + the all-max profit floor:
+
+| n | fee (XTZ) | all-max cost (XTZ) | profit | typical cost (p50) | typical markup |
+|---|---|---|---|---|---|
+| 1 | 0.75 | 0.43 | +74% | 0.18 | ~4× |
+| 5 | 1.75 | 1.29 | +36% | 0.53 | ~3× |
+| 10 | 3.0 | 2.36 | **+27%** | 0.98 | ~3× |
+
+The floor is the all-max column (≥+27% at the n=10 cap). The cost of guaranteeing it is that
+TYPICAL users pay ~3× their real cost — inherent to a fee that's linear in `txCount` (which
+can't see an op's byte size at quote time). **This is a dial:** size `perTx`/`base` at
+`1.2 × p50 (~107k)` instead for a fair ~20% markup on typical jobs, accepting the all-max batch
+runs at a small loss; or at `1.2 × p90 (~210k)` for a middle ground. The values above pick the
+worst-observed bound per the operator's "≥20% on the pathological batch" goal.
+
+**Residual:** an op fragmented *beyond* the observed max (toward the 1.04M-gas per-op cap, where
+storage could reach millions of µtz) still exceeds `perTxMutez` — the quote is on `txCount`, not
+bytes, so this can't be priced out. Bounded by the gas cap + `MAX_INJECT_TXS`; rare; the user
+prepaid. Tighten only if such ops actually appear.
 
 ## 6. Open questions
 
 1. ~~**Note-shape variance.**~~ **Resolved — see §6.1.** A 50-op mainnet sweep showed a
    bimodal 76,750–209,500 µtz storage-burn range (not the original single 307–371-byte
-   sample); `perTxMutez` raised 150k → **175k** (≈p90) so the heavy tail isn't underwater.
+   sample). `perTxMutez` set to **270k** (= 1.2 × the 215k worst-observed op) so the operator's
+   ≥20%-profit-on-the-all-max-batch goal holds; `baseMutez` 300k.
 2. **XTZ vs FA-token pools.** The measured op mixed pools; gas differs (XTZ
    set ~82k vs ~31k) but storage — the dominant term — does not vary much by
    pool. Proposal treats all pools identically; revisit only if a measured
