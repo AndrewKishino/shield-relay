@@ -95,8 +95,8 @@ services:
 
   # ───────────────────────────────────────────────────────────────────────────
   # OPTIONAL reverse proxy. Only starts with `--profile tls`.
-  # Caddy terminates TLS and proxies to relay:8080. WebSocket upgrades pass
-  # through automatically (Caddy needs no special config for WS).
+  # Caddy terminates TLS and proxies plain HTTP to relay:8080 (the relay is a
+  # request/response HTTP service — status is delivered by GET /status polling).
   #
   #   • Have a domain  → set DOMAIN=relay.example.com in .env, open 80+443,
   #                      Caddy gets a real Let's Encrypt cert automatically.

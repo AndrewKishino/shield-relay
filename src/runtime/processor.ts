@@ -6,7 +6,6 @@ import type { Logger } from '../observability/logger.js';
 import type { Metrics } from '../observability/metrics.js';
 import type { ContractParams } from '../core/types.js';
 import { WorkerQueue } from './workerQueue.js';
-import { WsHub } from '../server/wsHub.js';
 import { HttpError } from '../server/errors.js';
 import { frame, type StatusFrame } from '../server/statusFrames.js';
 import { toWireStatus } from '../core/jobs.js';
@@ -33,15 +32,14 @@ export interface ProcessorDeps {
   store: Store;
   queue: WorkerQueue;
   workers: Worker[];
-  wsHub: WsHub;
   logger: Logger;
   metrics: Metrics;
 }
 
 /**
  * The orchestration layer: maps the three wire endpoints onto durable state +
- * per-worker queue + core chain ops + WS fan-out. Every status transition is
- * persisted (Store) before it is published (WsHub).
+ * per-worker queue + core chain ops. Every status transition is persisted to the
+ * Store; the client reads them by polling GET /status (the single status transport).
  *
  * Crash-safety: the submit endpoints write a durable work_queue row BEFORE the
  * 2xx, and `runTask` is restart-safe — a counter pinned before `.send()` lets a
@@ -105,10 +103,10 @@ export class Processor {
 
   // ── GET /status/:jobId ─────────────────────────────────────────────────────
   /**
-   * Read-only status, jobSecret-gated — a polling fallback for when the WebSocket is
-   * unavailable. Mirrors the WS (re)subscribe exactly: an unauthorized or unknown jobId
-   * gets `not_found` (revealing nothing more), and a pre-payment `info_generated` job is
-   * also `not_found` on the wire (matching the WS, which never replays that state).
+   * Read-only status, jobSecret-gated — THE status transport the client polls. An
+   * unauthorized or unknown jobId gets `not_found` (revealing nothing more), and a
+   * pre-payment `info_generated` job is also `not_found` on the wire (that internal
+   * state is never exposed).
    */
   getStatus(jobId: string, jobSecret: string | undefined): StatusFrame {
     const job = this.d.store.getJob(jobId);
@@ -153,7 +151,6 @@ export class Processor {
     if (seq === null) throw new HttpError(409, 'Job status changed (concurrent submit).');
 
     this.dispatch(job.paymentPoolIndex, taskId);
-    this.d.wsHub.publish(frame(jobId, 'queued'));
     return { jobId, status: 'queued', message: 'Payment queued for verification.' };
   }
 
@@ -200,7 +197,6 @@ export class Processor {
     if (seq === null) throw new HttpError(409, 'Job already consumed (concurrent submit).');
 
     this.dispatch(job.broadcastPoolIndex, taskId);
-    this.d.wsHub.publish(frame(jobId, 'injecting_user_tx'));
     return { jobId, status: 'injecting_user_tx', message: 'User transaction queued for injection.' };
   }
 
@@ -231,7 +227,6 @@ export class Processor {
     try {
       this.d.store.setWorkState(taskId, 'running');
       this.d.store.setJobStatus(job.jobId, 'verifying_payment');
-      this.d.wsHub.publish(frame(job.jobId, 'verifying_payment'));
 
       const payment = JSON.parse(work.payloadJson) as ContractParams;
 
@@ -336,7 +331,6 @@ export class Processor {
 
       this.d.store.completeWork(taskId, job.jobId, 'payment_confirmed');
       this.d.metrics.jobs.inc({ status: 'payment_confirmed' });
-      this.d.wsHub.publish(frame(job.jobId, 'payment_confirmed'));
       this.d.logger.info({ jobId: job.jobId }, 'payment confirmed');
     } catch (e) {
       this.failPayment(taskId, job.jobId, e instanceof Error ? e.message : 'Payment injection failed.');
@@ -347,7 +341,6 @@ export class Processor {
     this.d.store.setWorkState(taskId, 'failed');
     this.d.store.setJobStatus(jobId, 'payment_failed', { errorMessage: msg });
     this.d.metrics.jobs.inc({ status: 'payment_failed' });
-    this.d.wsHub.publish(frame(jobId, 'payment_failed', { error: msg }));
     this.d.logger.warn({ jobId, msg }, 'payment failed');
   }
 
@@ -360,7 +353,6 @@ export class Processor {
 
     try {
       this.d.store.setWorkState(taskId, 'running');
-      this.d.wsHub.publish(frame(job.jobId, 'injecting_user_tx'));
 
       const landed =
         work.broadcastState !== 'none' &&
@@ -387,14 +379,12 @@ export class Processor {
 
       this.d.store.completeWork(taskId, job.jobId, 'completed', opHash);
       this.d.metrics.jobs.inc({ status: 'completed' });
-      this.d.wsHub.publish(frame(job.jobId, 'completed', { opHash }));
       this.d.logger.info({ jobId: job.jobId, opHash }, 'user transaction completed');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'User transaction injection failed.';
       this.d.store.setWorkState(taskId, 'failed');
       this.d.store.setJobStatus(job.jobId, 'user_tx_failed', { errorMessage: msg });
       this.d.metrics.jobs.inc({ status: 'user_tx_failed' });
-      this.d.wsHub.publish(frame(job.jobId, 'user_tx_failed', { error: msg }));
       this.d.logger.warn({ jobId: job.jobId, msg }, 'user transaction failed');
     }
   }

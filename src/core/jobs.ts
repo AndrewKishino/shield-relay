@@ -2,9 +2,9 @@ import type { JobStatus } from '../store/index.js';
 
 /**
  * The canonical WIRE status set ("shield-relay/1"). These are the ONLY statuses
- * sent to clients over the WebSocket. The internal `info_generated` (between
- * get-worker-info and submit-payment) is never emitted; `not_found` is emitted by
- * the WS hub for unknown/expired jobIds (it is not a stored job status).
+ * returned to clients from GET /status. The internal `info_generated` (between
+ * get-worker-info and submit-payment) is never exposed; `not_found` is returned for
+ * unknown/expired jobIds (it is not a stored job status).
  */
 export const WIRE_STATUSES = [
   'queued',

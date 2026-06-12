@@ -1,9 +1,10 @@
 import type { WireStatus } from '../core/jobs.js';
 
 /**
- * A WebSocket status frame. NEVER includes paymentTxHash. `operationHash` and
- * `userTxHash` carry the same value on `completed` (different clients read
- * different field names; sending both is the safe superset).
+ * A job-status frame — the body of GET /status/:jobId (the single status transport
+ * since the WS→poll migration). NEVER includes paymentTxHash. `operationHash` and
+ * `userTxHash` carry the same value on `completed` (different clients read different
+ * field names; sending both is the safe superset).
  */
 export interface StatusFrame {
   jobId: string;

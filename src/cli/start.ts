@@ -4,7 +4,6 @@ import { createLogger } from '../observability/logger.js';
 import { SqliteStore } from '../store/sqlite.js';
 import { loadPoolSecrets, buildPool } from '../sapling/pool.js';
 import { WorkerQueue } from '../runtime/workerQueue.js';
-import { WsHub } from '../server/wsHub.js';
 import { Processor } from '../runtime/processor.js';
 import { buildServer } from '../server/server.js';
 import { buildRelayInfo } from '../server/info.js';
@@ -18,8 +17,8 @@ import { Alerter } from '../observability/alerting.js';
 /**
  * `relay start` — wire the whole relay together and listen.
  *
- * P1: SQLite store, build the worker pool (parallelThreads:true), serve the three
- * routes + WS. P2 adds boot re-hydration + counter-pin reconcile + the low-gas
+ * P1: SQLite store, build the worker pool (parallelThreads:true), serve the HTTP
+ * routes (status via GET /status polling). P2 adds boot re-hydration + counter-pin reconcile + the low-gas
  * watchdog + full drain; this start path is the seam they slot into.
  */
 export async function start(): Promise<void> {
@@ -62,8 +61,7 @@ export async function start(): Promise<void> {
   await ensureWorkersRevealed(workers, logger);
 
   const queue = new WorkerQueue();
-  const wsHub = new WsHub(store, cfg.REQUIRE_JOB_SECRET);
-  const processor = new Processor({ config: cfg, store, queue, workers, wsHub, logger, metrics });
+  const processor = new Processor({ config: cfg, store, queue, workers, logger, metrics });
 
   // Resume any paid-but-unfinished work from before a restart (counter-pin safe).
   rehydrate(store, queue, processor, logger);
@@ -71,16 +69,11 @@ export async function start(): Promise<void> {
   let ready = false;
   const app = await buildServer({
     processor,
-    wsHub,
     metrics,
     info: buildRelayInfo(cfg),
     metricsToken: cfg.METRICS_TOKEN,
     rateLimitRpm: cfg.RATE_LIMIT_RPM,
-    maxConnections: cfg.MAX_CONNECTIONS,
-    wsHeartbeatMs: cfg.WS_HEARTBEAT_MS,
     trustProxy: cfg.TRUST_PROXY,
-    wsPath: cfg.WS_PATH,
-    wsAllowedOrigins: cfg.WS_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
     isReady: () => ready,
   });
   await app.listen({ port: cfg.PORT, host: '0.0.0.0' });
@@ -107,7 +100,7 @@ export async function start(): Promise<void> {
     stopAlerts();
     clearInterval(metricsTimer);
     try {
-      await app.close(); // stop new HTTP + WS
+      await app.close(); // stop new HTTP
       await queue.drain(); // let in-flight per-worker tasks finish
       lock.release();
       store.close();

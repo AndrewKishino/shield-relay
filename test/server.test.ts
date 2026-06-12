@@ -2,37 +2,27 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { buildServer } from '../src/server/server.js';
 import type { Processor } from '../src/runtime/processor.js';
-import type { WsHub } from '../src/server/wsHub.js';
 import type { Metrics } from '../src/observability/metrics.js';
 
 // Minimal stubs — buildServer only REGISTERS routes/hooks; it never calls into
 // these during build/listen, so empty objects are sufficient.
 const stubProcessor = {} as unknown as Processor;
-const stubWsHub = {} as unknown as WsHub;
 const stubMetrics = { contentType: 'text/plain', render: async () => '' } as unknown as Metrics;
 
-describe('buildServer (boot + hook ordering)', () => {
+describe('buildServer (boot + listen)', () => {
   let close: (() => Promise<void>) | undefined;
   afterEach(async () => {
     await close?.();
     close = undefined;
   });
 
-  it('builds and LISTENS without FST_ERR_INSTANCE_ALREADY_LISTENING (onClose hook before ready)', async () => {
+  it('builds and LISTENS, exposing the HTTP health + status surface', async () => {
     let ready = false;
-    // If the onClose addHook is moved back after app.ready(), buildServer throws
-    // "Fastify instance is already listening. Cannot call addHook!" — this is the
-    // regression guard for that ordering.
     const app = await buildServer({
       processor: stubProcessor,
-      wsHub: stubWsHub,
       metrics: stubMetrics,
       rateLimitRpm: 120,
-      maxConnections: 2000,
-      wsHeartbeatMs: 30_000,
       trustProxy: false,
-      wsPath: "/",
-      wsAllowedOrigins: [],
       isReady: () => ready,
     });
     close = () => app.close();
@@ -59,15 +49,10 @@ describe('buildServer (boot + hook ordering)', () => {
   it('/metrics is token-gated when METRICS_TOKEN is set (404 off → 401 bad → 200 bearer)', async () => {
     const app = await buildServer({
       processor: stubProcessor,
-      wsHub: stubWsHub,
       metrics: stubMetrics,
       metricsToken: 's3cret',
       rateLimitRpm: 120,
-      maxConnections: 2000,
-      wsHeartbeatMs: 30_000,
       trustProxy: false,
-      wsPath: "/",
-      wsAllowedOrigins: [],
       isReady: () => true,
     });
     close = () => app.close();

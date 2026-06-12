@@ -3,7 +3,7 @@ import { Processor } from '../src/runtime/processor.js';
 import type { JobRow } from '../src/store/index.js';
 
 /** A Processor wired with just enough stubs to exercise the submit-path money gates.
- *  The rejection paths throw BEFORE enqueue/dispatch, so queue/workers/wsHub are inert. */
+ *  The rejection paths throw BEFORE enqueue/dispatch, so queue/workers are inert. */
 function makeProcessor(job: Partial<JobRow>, legacyFlatMaxTxs = 0): Processor {
   const full: JobRow = {
     jobId: 'job-1', status: 'payment_confirmed', paymentPoolIndex: 0, broadcastPoolIndex: 1,
@@ -16,7 +16,6 @@ function makeProcessor(job: Partial<JobRow>, legacyFlatMaxTxs = 0): Processor {
     store: { getJob: () => full, enqueueWork: () => 1 },
     queue: { enqueue: () => Promise.resolve() },
     workers: [{ index: 0, tezosAddress: 'tz1' }],
-    wsHub: { publish: () => undefined },
     logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
     metrics: {},
   } as unknown as ConstructorParameters<typeof Processor>[0];

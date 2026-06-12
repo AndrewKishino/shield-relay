@@ -1,8 +1,8 @@
 # shield-relay — Caddy reverse proxy (optional `tls` profile).
 #
 # Caddy auto-provisions and renews a Let's Encrypt certificate for $DOMAIN and
-# proxies everything — including WebSocket upgrades — to the relay container.
-# Caddy handles WS transparently; no special directive is required.
+# reverse-proxies HTTP to the relay container (a plain request/response service —
+# status is delivered by GET /status polling, no upgrade handling needed).
 #
 # ── With a domain (recommended) ─────────────────────────────────────────────
 #   In .env:  DOMAIN=relay.example.com
@@ -21,8 +21,7 @@
 # {$DOMAIN} expands from the environment (passed via env_file in compose).
 
 {$DOMAIN} {
-	# Forward to the relay service on the compose network. reverse_proxy
-	# upgrades Connection/Upgrade headers automatically, so WS just works.
+	# Forward HTTP to the relay service on the compose network.
 	reverse_proxy relay:8080 {
 		# Surface the real client IP to the relay's rate limiter / logs.
 		header_up X-Forwarded-For {remote_host}

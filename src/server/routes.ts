@@ -26,9 +26,9 @@ export function registerRoutes(app: FastifyInstance, processor: Processor): void
     }
   });
 
-  // Read-only status poll — a fallback for when the WebSocket can't connect (corp
-  // proxies, flaky networks). jobSecret travels in the `x-job-secret` header (not the
-  // URL, so it can't leak via access logs). Same auth + not_found semantics as the WS.
+  // Read-only status poll — THE status transport (the client polls this to drive Phase 2
+  // + completion). jobSecret travels in the `x-job-secret` header (not the URL, so it can't
+  // leak via access logs). Returns an explicit not_found frame for unknown/expired jobIds.
   app.get('/status/:jobId', async (req, reply) => {
     const { jobId } = req.params as { jobId: string };
     const secret = req.headers['x-job-secret'];
